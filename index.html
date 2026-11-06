@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Validación de certificados</title>
+  <script src="config.js"></script>
+  <script src="cripto.js"></script>
+  <style>
+    :root { --marca: #1f6f5c; --ok: #1e8e3e; --error: #c5221f; --texto: #202124; --suave: #5f6368; --borde: #e3e3e3; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--texto); background: #f6f7f8; }
+    header { background: #fff; border-bottom: 4px solid var(--marca); padding: 16px; display: flex; align-items: center; gap: 14px; }
+    header img { height: 48px; }
+    header .emp { font-weight: 700; font-size: 1.15rem; }
+    header .sub { color: var(--suave); font-size: .85rem; }
+    main { max-width: 640px; margin: 24px auto; padding: 0 16px; }
+    .tarjeta { background: #fff; border: 1px solid var(--borde); border-radius: 12px; padding: 24px; }
+    .estado { display: flex; align-items: center; gap: 12px; font-size: 1.3rem; font-weight: 700; margin-bottom: 18px; }
+    .icono { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-size: 1.5rem; flex: none; }
+    .valido .icono { background: var(--ok); } .valido .estado { color: var(--ok); }
+    .invalido .icono { background: var(--error); } .invalido .estado { color: var(--error); }
+    dl { display: grid; grid-template-columns: max-content 1fr; gap: 10px 16px; margin: 0; }
+    dt { color: var(--suave); } dd { margin: 0; font-weight: 600; }
+    .titulo { font-size: 1.15rem; font-weight: 700; margin: 0 0 8px; }
+    .nombre { font-size: 1.45rem; font-weight: 500; margin: 18px 0 18px; }
+    .codigo { font-family: ui-monospace, monospace; letter-spacing: .5px; }
+    form { display: flex; gap: 8px; flex-wrap: wrap; }
+    input { flex: 1; min-width: 200px; padding: 12px; font-size: 1rem; border: 1px solid #bbb; border-radius: 8px; text-transform: uppercase; font-family: ui-monospace, monospace; }
+    button { padding: 12px 18px; font-size: 1rem; border: 0; border-radius: 8px; background: var(--marca); color: #fff; cursor: pointer; }
+    .nota { color: var(--suave); font-size: .85rem; margin-top: 18px; line-height: 1.45; }
+    @media (max-width: 480px) { dl { grid-template-columns: 1fr; gap: 2px; } dd { margin-bottom: 10px; } }
+  </style>
+</head>
+<body>
+  <header>
+    <img id="logo" alt="" hidden>
+    <div>
+      <div class="emp" id="empresa"></div>
+      <div class="sub">Validación de certificados laborales</div>
+    </div>
+  </header>
+
+  <main>
+    <div class="tarjeta" id="resultado">Verificando…</div>
+    <p class="nota" id="nota"></p>
+  </main>
+
+<script>
+  const C = window.CONFIG;
+  document.documentElement.style.setProperty("--marca", C.colorPrincipal);
+  document.getElementById("empresa").textContent = C.empresa;
+  if (C.logo) { const l = document.getElementById("logo"); l.src = C.logo; l.alt = C.empresa; l.hidden = false; }
+  document.getElementById("nota").innerHTML =
+    "Esta validación solo es confiable si la dirección del navegador comienza con <b>" +
+    escapar(C.urlValidacion) + "</b>. Ante dudas, contacte a " + escapar(C.contacto) + ".";
+
+  const caja = document.getElementById("resultado");
+
+  function escapar(s) {
+    return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+  function fecha(iso) {
+    if (!iso) return "—";
+    const [a, m, d] = iso.split("-");
+    return `${d}-${m}-${a}`;
+  }
+
+  function formularioManual(mensaje) {
+    caja.className = "tarjeta";
+    caja.innerHTML = `
+      <p style="margin-top:0">${mensaje}</p>
+      <form id="f">
+        <input id="cod" placeholder="XXXX-XXXX-XXXX-XXXX" autocomplete="off" required>
+        <button>Validar</button>
+      </form>`;
+    document.getElementById("f").onsubmit = (e) => {
+      e.preventDefault();
+      const cod = Cripto.normalizar(document.getElementById("cod").value);
+      location.search = "?id=" + cod.match(/.{1,4}/g).join("-");
+    };
+  }
+
+  function invalido(titulo, detalle, codigo) {
+    caja.className = "tarjeta invalido";
+    caja.innerHTML = `
+      <div class="estado"><span class="icono">✕</span>${titulo}</div>
+      <p>${detalle}</p>
+      ${codigo ? `<p>Código consultado: <span class="codigo">${escapar(codigo)}</span></p>` : ""}`;
+  }
+
+  async function validar() {
+    const id = new URLSearchParams(location.search).get("id");
+    if (!id) return formularioManual("Escanee el código QR del certificado o ingrese su código de verificación:");
+    if (Cripto.normalizar(id).length !== 16)
+      return invalido("Código no válido", "El código no tiene el formato correcto.", id);
+
+    let db;
+    try {
+      const r = await fetch("certificados.json", { cache: "no-store" });
+      db = await r.json();
+    } catch {
+      caja.textContent = "No se pudo consultar la base de certificados. Intente más tarde.";
+      return;
+    }
+
+    const clave = await Cripto.claveBusqueda(id);
+    const registro = db.certificados[clave];
+    if (!registro)
+      return invalido("Certificado NO válido", "No existe un certificado emitido por " + escapar(C.empresa) + " con este código.", id);
+
+    let d;
+    try { d = await Cripto.descifrar(id, registro); }
+    catch { return invalido("Certificado NO válido", "El código no corresponde a un certificado auténtico.", id); }
+
+    if ((db.anulados || []).includes(clave))
+      return invalido("Certificado ANULADO", `El certificado folio <b>${escapar(d.folio || "—")}</b> a nombre de <b>${escapar(d.nombre)}</b> fue anulado por la empresa y no tiene validez.`, id);
+
+    // Solo se muestran los datos que se ingresaron al emitir
+    const filas = [
+      ["RUT", d.rut], ["Cargo", d.cargo], ["Tipo de contrato", d.contrato],
+      ["Fecha de ingreso", d.ingreso && fecha(d.ingreso)], ["Fecha de emisión", fecha(d.emision)],
+      ["Empleador", C.empresa + " · RUT " + C.rutEmpresa]
+    ].filter(([, v]) => v).map(([k, v]) => `<dt>${k}</dt><dd>${escapar(v)}</dd>`).join("");
+
+    caja.className = "tarjeta valido";
+    caja.innerHTML = `
+      <div class="estado"><span class="icono">✓</span>Certificado válido</div>
+      <p class="titulo">${escapar(String(d.tipo).toUpperCase())}</p>
+      <p class="titulo">N° FOLIO: ${escapar(d.folio || "—")}</p>
+      <p class="nombre">${escapar(d.nombre)}</p>
+      <dl>${filas}</dl>`;
+  }
+
+  validar();
+</script>
+</body>
+</html>

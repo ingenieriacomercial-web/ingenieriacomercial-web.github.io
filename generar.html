@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Emisión de certificados (uso interno)</title>
+  <script src="config.js"></script>
+  <script src="cripto.js"></script>
+  <script src="qrcode.min.js"></script>  <!-- qrcodejs 1.0.0, licencia MIT -->
+  <style>
+    :root { --marca: #1f6f5c; --borde: #ddd; --suave: #5f6368; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: #f6f7f8; color: #202124; }
+    header { background: var(--marca); color: #fff; padding: 14px 16px; }
+    header b { font-size: 1.1rem; }
+    main { max-width: 860px; margin: 20px auto; padding: 0 16px; display: grid; gap: 16px; }
+    section { background: #fff; border: 1px solid var(--borde); border-radius: 12px; padding: 20px; }
+    h2 { margin: 0 0 12px; font-size: 1.05rem; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    label { display: grid; gap: 4px; font-size: .9rem; color: var(--suave); }
+    input, select { padding: 10px; font-size: 1rem; border: 1px solid #bbb; border-radius: 8px; color: #202124; }
+    button { padding: 10px 16px; font-size: 1rem; border: 0; border-radius: 8px; background: var(--marca); color: #fff; cursor: pointer; }
+    button.sec { background: #fff; color: var(--marca); border: 1px solid var(--marca); }
+    .fila { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+    .aviso { background: #fff4e5; border: 1px solid #f0c36d; border-radius: 8px; padding: 10px 12px; font-size: .9rem; }
+    .error { color: #c5221f; font-size: .9rem; }
+    #salida { display: none; gap: 20px; grid-template-columns: auto 1fr; align-items: start; }
+    #qr { padding: 10px; background: #fff; border: 1px solid var(--borde); border-radius: 8px; }
+    .codigo { font-family: ui-monospace, monospace; font-size: 1.2rem; font-weight: 700; letter-spacing: 1px; }
+    table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--borde); }
+    td.codigo { font-size: .9rem; }
+    .estado { font-weight: 600; }
+    @media (max-width: 600px) { .grid, #salida { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<header><b id="titulo"></b><div>Emisión de certificados · uso interno</div></header>
+
+<main>
+  <section>
+    <h2>1. Cargar la base actual</h2>
+    <p>Sube el <b>certificados.json</b> que está publicado ahora (si es la primera vez, parte de cero).</p>
+    <div class="fila">
+      <input type="file" id="archivo" accept=".json,application/json">
+      <span id="estadoBase" class="estado">Base vacía (0 certificados)</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. Emitir certificado</h2>
+    <form id="form">
+      <div class="grid">
+        <label>N° de folio (escríbelo igual en el PDF)<input name="folio" required pattern="[0-9A-Za-z\-]+"></label>
+        <label>Tipo de certificado
+          <select name="tipo">
+            <option>CERTIFICADO DE TRABAJO</option><option>CERTIFICADO DE ANTIGÜEDAD LABORAL</option>
+          </select>
+        </label>
+        <label>Nombre completo<input name="nombre" required></label>
+        <label>Fecha de emisión<input type="date" name="emision" required></label>
+        <label>RUT del trabajador (opcional)<input name="rut" placeholder="12.345.678-9"></label>
+        <label>Cargo (opcional)<input name="cargo"></label>
+        <label>Tipo de contrato (opcional)
+          <select name="contrato">
+            <option value="">— no mostrar —</option><option>Indefinido</option><option>Plazo fijo</option><option>Por obra o faena</option>
+          </select>
+        </label>
+        <label>Fecha de ingreso (opcional)<input type="date" name="ingreso"></label>
+      </div>
+      <div class="fila"><button>Generar código y QR</button><span id="errForm" class="error"></span></div>
+    </form>
+
+    <div id="salida" class="fila">
+      <div id="qr"></div>
+      <div>
+        <div>Código de verificación:</div>
+        <div class="codigo" id="codigo"></div>
+        <p style="word-break:break-all"><a id="enlace" target="_blank"></a></p>
+        <div class="fila">
+          <button type="button" class="sec" id="bajarQR">Descargar QR (PNG)</button>
+        </div>
+        <p class="aviso">Pega el QR y el código en el certificado (Word/PDF). <b>Este código no se puede recuperar después</b>: queda solo en el certificado y en la lista de abajo mientras no cierres esta página.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. Anular un certificado</h2>
+    <div class="fila">
+      <input id="codAnular" placeholder="XXXX-XXXX-XXXX-XXXX" style="flex:1;min-width:220px;text-transform:uppercase">
+      <button type="button" id="btnAnular">Anular</button>
+      <span id="msgAnular"></span>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. Guardar y publicar</h2>
+    <p>Descarga la base actualizada y reemplaza <b>certificados.json</b> en el repositorio. Los cambios se verán en la página de validación en 1–2 minutos.</p>
+    <div class="fila"><button type="button" id="bajarJSON">Descargar certificados.json</button><span id="pendientes" class="aviso" hidden>Hay cambios sin descargar</span></div>
+    <h2 style="margin-top:18px">Emitidos en esta sesión</h2>
+    <table><thead><tr><th>Folio</th><th>Código QR</th><th>Nombre</th><th>Emisión</th></tr></thead><tbody id="tabla"></tbody></table>
+  </section>
+</main>
+
+<script>
+  const C = window.CONFIG;
+  document.documentElement.style.setProperty("--marca", C.colorPrincipal);
+  document.getElementById("titulo").textContent = C.empresa;
+  // Folio tipo 20261106153045 (año, mes, día, hora, min, seg) y fecha local
+  const dos = (n) => String(n).padStart(2, "0");
+  function hoy() { const d = new Date(); return `${d.getFullYear()}-${dos(d.getMonth() + 1)}-${dos(d.getDate())}`; }
+  function nuevoFolio() {
+    const d = new Date();
+    return `${d.getFullYear()}${dos(d.getMonth() + 1)}${dos(d.getDate())}${dos(d.getHours())}${dos(d.getMinutes())}${dos(d.getSeconds())}`;
+  }
+  function valoresPorDefecto() {
+    document.querySelector('[name="emision"]').value = hoy();
+    document.querySelector('[name="folio"]').value = nuevoFolio();
+  }
+  valoresPorDefecto();
+  const foliosSesion = new Set();
+
+  let db = { certificados: {}, anulados: [] };
+  let cambios = false;
+  let ultimoCodigo = null;
+
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const url = (cod) => C.urlValidacion + "?id=" + cod;
+
+  function marcarCambios(v) { cambios = v; $("pendientes").hidden = !v; }
+  function mostrarEstadoBase() {
+    const n = Object.keys(db.certificados).length;
+    $("estadoBase").textContent = `Base cargada: ${n} certificado(s), ${db.anulados.length} anulado(s)`;
+  }
+  window.addEventListener("beforeunload", (e) => { if (cambios) { e.preventDefault(); e.returnValue = ""; } });
+
+  // 1. Cargar base
+  $("archivo").onchange = async (e) => {
+    try {
+      const datos = JSON.parse(await e.target.files[0].text());
+      if (!datos.certificados || !Array.isArray(datos.anulados)) throw 0;
+      db = datos; mostrarEstadoBase(); marcarCambios(false);
+    } catch { alert("El archivo no es un certificados.json válido."); }
+  };
+
+  // 2. Emitir
+  $("form").onsubmit = async (e) => {
+    e.preventDefault();
+    const f = Object.fromEntries(new FormData(e.target));
+    $("errForm").textContent = "";
+    const folio = f.folio.trim().toUpperCase();
+    if (foliosSesion.has(folio)) { $("errForm").textContent = "Ese folio ya se usó en esta sesión."; return; }
+    if (f.rut.trim() && !Cripto.rutValido(f.rut)) { $("errForm").textContent = "RUT inválido (revisa el dígito verificador)."; return; }
+    if (f.ingreso && f.ingreso > f.emision) { $("errForm").textContent = "La fecha de ingreso no puede ser posterior a la emisión."; return; }
+
+    const codigo = Cripto.nuevoCodigo();
+    const datos = {
+      folio, tipo: f.tipo,
+      nombre: f.nombre.trim().toUpperCase(),
+      rut: f.rut.trim() ? Cripto.enmascararRut(f.rut) : "",   // el RUT completo nunca se guarda
+      cargo: f.cargo.trim(), contrato: f.contrato,
+      ingreso: f.ingreso, emision: f.emision
+    };
+    foliosSesion.add(folio);
+    db.certificados[await Cripto.claveBusqueda(codigo)] = await Cripto.cifrar(codigo, datos);
+    marcarCambios(true); mostrarEstadoBase();
+
+    ultimoCodigo = codigo;
+    $("codigo").textContent = codigo;
+    $("enlace").href = $("enlace").textContent = url(codigo);
+    $("qr").innerHTML = "";
+    new QRCode($("qr"), { text: url(codigo), width: 200, height: 200, correctLevel: QRCode.CorrectLevel.M });
+    $("salida").style.display = "grid";
+
+    $("tabla").insertAdjacentHTML("afterbegin",
+      `<tr><td>${esc(folio)}</td><td class="codigo">${codigo}</td><td>${esc(datos.nombre)}</td><td>${datos.emision}</td></tr>`);
+    e.target.reset();
+    valoresPorDefecto();
+  };
+
+  $("bajarQR").onclick = () => {
+    // QR grande (para impresión) con margen blanco, que los celulares necesitan para leerlo
+    const tmp = document.createElement("div");
+    new QRCode(tmp, { text: url(ultimoCodigo), width: 600, height: 600, correctLevel: QRCode.CorrectLevel.M });
+    const m = 60, canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 600 + 2 * m;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(tmp.querySelector("canvas"), m, m);
+    const a = document.createElement("a");
+    a.href = canvas.toDataURL("image/png");
+    a.download = "QR-" + ultimoCodigo + ".png";
+    a.click();
+  };
+
+  // 3. Anular
+  $("btnAnular").onclick = async () => {
+    const cod = $("codAnular").value;
+    const msg = $("msgAnular");
+    if (Cripto.normalizar(cod).length !== 16) { msg.textContent = "Código incompleto."; return; }
+    const clave = await Cripto.claveBusqueda(cod);
+    if (!db.certificados[clave]) { msg.textContent = "Ese código no está en la base cargada."; return; }
+    if (db.anulados.includes(clave)) { msg.textContent = "Ya estaba anulado."; return; }
+    const d = await Cripto.descifrar(cod, db.certificados[clave]);
+    if (!confirm(`¿Anular el certificado de ${d.nombre}?`)) return;
+    db.anulados.push(clave);
+    msg.textContent = `Anulado: ${d.nombre}. Recuerda descargar y publicar la base.`;
+    $("codAnular").value = "";
+    marcarCambios(true); mostrarEstadoBase();
+  };
+
+  // 4. Descargar
+  $("bajarJSON").onclick = () => {
+    const blob = new Blob([JSON.stringify(db, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "certificados.json";
+    a.click();
+    marcarCambios(false);
+  };
+</script>
+</body>
+</html>
